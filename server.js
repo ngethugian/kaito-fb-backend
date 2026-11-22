@@ -43,7 +43,8 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: "2mb" }));
+// Tăng giới hạn JSON lên 15mb để nhận kèm ảnh thumbnail chất lượng cao
+app.use(express.json({ limit: "15mb" }));
 
 /* ===================== MÃ HÓA AES-256-GCM LƯU TOKEN AN TOÀN ===================== */
 
@@ -275,7 +276,7 @@ app.post("/api/facebook/logout", requireSession, (req, res) => {
   res.json({ ok: true });
 });
 
-/* ===================== ROUTES ĐĂNG VIDEO RESUMABLE (3 PHA) ===================== */
+/* ===================== ROUTES ĐĂNG VIDEO RESUMABLE (3 PHA + THUMBNAIL) ===================== */
 
 app.post("/api/facebook/upload/start", requireSession, async (req, res) => {
   try {
@@ -381,7 +382,9 @@ app.post("/api/facebook/upload/finish", requireSession, async (req, res) => {
       description,
       publishMode,
       scheduledPublishTime,
-      idempotencyKey
+      idempotencyKey,
+      thumbnailBase64,
+      thumbnailMime
     } = req.body || {};
 
     if (!pageId || !uploadSessionId) {
@@ -399,6 +402,19 @@ app.post("/api/facebook/upload/finish", requireSession, async (req, res) => {
     form.append("upload_session_id", String(uploadSessionId));
     if (title) form.append("title", String(title));
     if (description) form.append("description", String(description));
+
+    // Đính kèm ảnh bìa (thumbnail) nếu người dùng đã chọn
+    let hasThumbnail = false;
+    if (thumbnailBase64 && typeof thumbnailBase64 === "string") {
+      const cleanBase64 = thumbnailBase64.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
+      const thumbBuffer = Buffer.from(cleanBase64, "base64");
+      if (thumbBuffer.length > 0 && thumbBuffer.length <= 10 * 1024 * 1024) {
+        const safeMime = thumbnailMime === "image/png" ? "image/png" : "image/jpeg";
+        const ext = safeMime === "image/png" ? "png" : "jpg";
+        form.append("thumb", new Blob([thumbBuffer], { type: safeMime }), `thumbnail.${ext}`);
+        hasThumbnail = true;
+      }
+    }
 
     if (publishMode === "schedule") {
       const unixTs = Number(scheduledPublishTime);
@@ -453,7 +469,8 @@ app.post("/api/facebook/upload/finish", requireSession, async (req, res) => {
       success: true,
       videoId,
       permalinkUrl,
-      scheduled: publishMode === "schedule"
+      scheduled: publishMode === "schedule",
+      hasThumbnail
     });
   } catch (err) {
     res.status(500).json({ error: `Lỗi hoàn tất đăng bài: ${err.message}` });
